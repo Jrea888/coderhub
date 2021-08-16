@@ -1,5 +1,5 @@
 # condernode
-基于 nodejs + koa + mysql 开发web服务接口
+基于 nodejs + koa + mysql 开发web业务接口
 ## 以下是完成的业务接口
 ### 用户管理接口
 * 用户登录接口
