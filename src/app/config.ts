@@ -1,9 +1,9 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import dotenv from 'dotenv';
+import fs from 'node:fs'
+import path from 'node:path'
+import dotenv from 'dotenv'
 
 // 将 .env 的变量注入 process.env（按 cwd 找 .env，npm 脚本均在项目根执行）
-dotenv.config();
+dotenv.config()
 
 /**
  * 密钥目录
@@ -15,17 +15,17 @@ dotenv.config();
  * 也可以用 KEY_DIR 环境变量覆盖（比如部署时挂载密钥）。
  */
 const KEY_DIR = process.env.KEY_DIR
-  ? path.resolve(process.env.KEY_DIR)
-  : path.resolve(__dirname, '..', '..', 'src', 'app', 'keys');
+    ? path.resolve(process.env.KEY_DIR)
+    : path.resolve(__dirname, '..', '..', 'src', 'app', 'keys')
 
-export const PRIVATE_KEY: Buffer = fs.readFileSync(path.join(KEY_DIR, 'private.key'));
-export const PUBLIC_KEY: Buffer = fs.readFileSync(path.join(KEY_DIR, 'public.key'));
+export const PRIVATE_KEY: Buffer = fs.readFileSync(path.join(KEY_DIR, 'private.key'))
+export const PUBLIC_KEY: Buffer = fs.readFileSync(path.join(KEY_DIR, 'public.key'))
 
-export const APP_HOST: string = process.env.APP_HOST || 'http://localhost';
-export const APP_PORT: number = Number(process.env.APP_PORT) || 8888;
+export const APP_HOST: string = process.env.APP_HOST || 'http://localhost'
+export const APP_PORT: number = Number(process.env.APP_PORT) || 8888
 
-export const MYSQL_HOST: string = process.env.MYSQL_HOST || 'localhost';
-export const MYSQL_PORT: number = Number(process.env.MYSQL_PORT) || 3306;
-export const MYSQL_DATABASE: string = process.env.MYSQL_DATABASE || 'codetest';
-export const MYSQL_USER: string = process.env.MYSQL_USER || 'root';
-export const MYSQL_PASSWORD: string = process.env.MYSQL_PASSWORD || '';
+export const MYSQL_HOST: string = process.env.MYSQL_HOST || 'localhost'
+export const MYSQL_PORT: number = Number(process.env.MYSQL_PORT) || 3306
+export const MYSQL_DATABASE: string = process.env.MYSQL_DATABASE || 'codetest'
+export const MYSQL_USER: string = process.env.MYSQL_USER || 'root'
+export const MYSQL_PASSWORD: string = process.env.MYSQL_PASSWORD || ''

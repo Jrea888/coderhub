@@ -1,0 +1,5 @@
+node_modules/
+dist/
+uploads/
+src/app/keys/
+package-lock.json

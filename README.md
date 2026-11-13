@@ -53,8 +53,10 @@
 | 数据库 | mysql2 | 3.24.6 | 连接池 + `promise()`，原生 SQL |
 | 配置 | dotenv | 17.4.2 | `.env` → `process.env` |
 | 认证 | `node:crypto` | 内置 | RS256 签发/验签，零第三方依赖 |
+| 格式化 | Prettier | 3.10.1 | `.prettierrc` 固化风格，`npm run format` |
+| 静态检查 | Biome | 2.6.7 | `npm run lint`，替代 ESLint（原因见 [§7.8](#8-代码规范为什么用-biome-而不是-eslint)） |
 
-**未引入**：ORM（手写 SQL）、Jest、ESLint/Prettier、CORS 中间件、日志与限流。
+**未引入**：ORM（手写 SQL）、Jest、CORS 中间件、日志与限流。
 
 两个有意的取舍：
 
@@ -148,9 +150,12 @@ coderhub/
 │       ├── koa.d.ts               # 扩展 ctx.state.user / labels、ctx.file / files
 │       └── koa-multer.d.ts        # @koa/multer 类型补齐
 ├── uploads/                       # 运行期上传产物（avatar/ picture/）
-├── tsconfig.json                  # strict + nodenext，输出 dist
+├── tsconfig.json                  # strict + 10 项更严开关，输出 dist
+├── .editorconfig                  # 编辑器行为（LF、2 空格、UTF-8、末尾换行）
+├── .prettierrc / .prettierignore  # 格式化规则与忽略清单
+├── biome.json                     # 静态检查规则（只开 linter，格式交给 Prettier）
 ├── .env.example                   # 环境变量模板
-└── package.json                   # dev / start / build / typecheck / serve
+└── package.json                   # dev / start / build / typecheck / lint / format / serve
 ```
 
 分层职责：
@@ -478,6 +483,33 @@ if (!ALLOWED_TABLES.includes(tableName)) → 400
 - 动态：`offset` 非负整数（默认 0），`size` 正整数（默认 10、`Math.min(..., 100)`）；
 - 标签：`limit` 默认 10、上限 100；非法值一律兜底到默认，不报错。
 
+### 8. 代码规范：为什么用 Biome 而不是 ESLint
+
+先摆结论：**`typescript-eslint` 在 TypeScript 7 上跑不起来**，所以 ESLint 这条链整体不可用，不是没配好。
+
+- TS 7 的 npm 包是原生编译器发行版，根入口 `exports['.'] → ./lib/version.cjs`，`require('typescript')` 只能拿到 `{ version, versionMajorMinor }`，没有 `createSourceFile` 之类的编译器 API；
+- `typescript-eslint@8.72` 的 peer 要求 `typescript >=4.8.4 <6.1.0`，装依赖直接 `ERESOLVE`；加 `--legacy-peer-deps` 强装后一运行就抛 `typescript-eslint does not support TS 7.0.`；
+- 另外 **ESLint 10 已移除 `.eslintrc`**，只认 `eslint.config.js`（flat config）。
+
+Biome 是 Rust 实现、自带 TS 解析器、不依赖 TS 编译器 API，因此不受影响：37 个文件 35 ms 扫完。
+
+四个工具的分工：
+
+| 工具 | 管什么 | 配置文件 |
+|---|---|---|
+| EditorConfig | 缩进、行尾、编码、末尾换行 | `.editorconfig` |
+| Prettier | 引号、分号、换行、尾逗号 | `.prettierrc` |
+| Biome | 未使用变量、隐式 `any`、危险写法 | `biome.json` |
+| tsc | 类型与语言特性 | `tsconfig.json` |
+
+衔接方式：Prettier 会自动读取 `.editorconfig`（`indent_size`、`end_of_line` 等），两边保持一致即可——本项目统一 2 空格 + LF。Biome 关掉 formatter 只留 linter，避免和 Prettier 抢格式。
+
+`tsconfig.json` 在 `strict` 之上又开了 10 项，落地时全部 0 错误：`noUnusedLocals`、`noUnusedParameters`、`noImplicitReturns`、`noFallthroughCasesInSwitch`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`noImplicitOverride`、`isolatedModules`、`erasableSyntaxOnly`、`noUncheckedSideEffectImports`。
+
+其中 `erasableSyntaxOnly` 值得单独说：`tsx` 用 esbuild 只剥类型、不做真正的编译，`enum`、`namespace`、构造函数参数属性这类"带运行时语义的语法"会直接炸；开了这个开关，`tsc` 阶段就会拦下来。
+
+没开的两个：`noPropertyAccessFromIndexSignature`（现有 25 处 `ctx.query.xxx`、`process.env.XXX`）、`verbatimModuleSyntax`（包是 CJS、源码是 ESM 语法，会报 170 处）。
+
 ---
 
 ## 八、数据库设计
@@ -512,10 +544,14 @@ if (!ALLOWED_TABLES.includes(tableName)) → 400
 | `npm run dev` | `tsx watch src/main.ts`，改代码自动重启 |
 | `npm run start` | `tsx src/main.ts`，跑一次（不 watch、不做类型检查） |
 | `npm run typecheck` | `tsc --noEmit`，只检查不产出 |
+| `npm run lint` | `biome lint src`，静态检查（不含格式） |
+| `npm run format` | `prettier --write "src/**/*.ts"`，就地格式化 |
+| `npm run format:check` | `prettier --check`，CI 用，不改文件 |
 | `npm run build` | `tsc -p tsconfig.json` → `dist/` |
 | `npm run serve` | `node dist/main.js`，需先 `build` |
 
 > `tsx` 只做转译、不做类型检查，CI 里要单独跑 `npm run typecheck`。
+> 提交前建议依次跑 `npm run lint`、`npm run format:check`、`npm run typecheck`。
 
 ### 环境变量
 
@@ -573,7 +609,9 @@ openssl rsa -in src/app/keys/private.key -pubout -out src/app/keys/public.key
 
 | 检查项 | 结果 |
 |---|---|
-| `npx tsc --noEmit` | **0 错误** |
+| `npx tsc --noEmit` | **0 错误**（含 10 项更严编译开关） |
+| `npm run lint` | **0 error**（37 个文件） |
+| `npm run format:check` | 全部符合 Prettier 风格 |
 | `npm run build` | 成功，`dist/` 70 个文件（`.js` + `.d.ts` + `.map`） |
 | `node dist/main.js` | 启动并正常响应 |
 | `npm run start`（tsx） | 启动并正常响应 |
@@ -600,7 +638,7 @@ openssl rsa -in src/app/keys/private.key -pubout -out src/app/keys/public.key
 2. **密码是无盐 MD5**。换 scrypt/bcrypt 前要先加宽列：`ALTER TABLE users MODIFY password VARCHAR(255);`（schema 已是 255，老库需确认），否则可能写入失败。
 3. **私钥与测试图片进了版本库**。`src/app/keys/private.key`、`uploads/*.jpg` 仍被 Git 跟踪（`.gitignore` 对已跟踪文件无效）。建议 `git rm --cached` 并轮换密钥。
 4. **删除动态不清理磁盘文件**。数据库记录随外键级联删除，`uploads/` 下的物理文件成为孤儿。
-5. **缺少通用能力**：CORS、请求日志、限流、单元测试、ESLint/Prettier 均未引入。
+5. **缺少通用能力**：CORS、请求日志、限流、单元测试均未引入。
 6. **`tsx` 不做类型检查**，CI 需单独跑 `npm run typecheck`。
 7. **`package.json` 的 `name` 拼成了 `corderhub`**（少一个 d），不影响运行。
 8. **列表/详情键名不统一**：列表用 `users`，详情用 `author`；`comments`/`labels`/`images` 无数据时为 `null`。
