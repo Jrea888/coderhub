@@ -1,11 +1,12 @@
 /*
- * @Description: 错误信息处理
+ * @Description: 错误信息处理（错误常量 → HTTP 状态码 + 提示）
  * @Author: zhangweigang
  * @Date: 2021-08-09 12:29:31
- * @LastEditTime: 2021-08-11 14:26:03
+ * @LastEditTime: 2021-11-13 10:00:00
  * @LastEditors: zhangweigang
  */
 const errorTypes = require('../constants/errorTypes');
+
 const errorHandle = (error, ctx) => {
   let status, message;
 
@@ -16,7 +17,7 @@ const errorHandle = (error, ctx) => {
       message = '用户名称或者密码不能为空!';
       break;
     case errorTypes.USER_ALREADY_EXISTS:
-      status = 409; // conflict
+      status = 409; // Conflict
       message = '用户名已经存在!';
       break;
     case errorTypes.CURRENT_USER_NOT_EXISTS:
@@ -28,17 +29,27 @@ const errorHandle = (error, ctx) => {
       message = '用户密码错误!';
       break;
     case errorTypes.UNAUTHORIZATION:
-      status = 401; // 参数错误
+      status = 401; // 未认证
       message = '无效的token!';
       break;
     case errorTypes.UNPERMISSION:
-      status = 401; // 参数错误
+      status = 403; // 已认证但无权限（原来错写成 401）
       message = '无权限操作!';
       break;
-
-    default:
+    case errorTypes.INVALID_PARAMETERS:
+      status = 400;
+      message = '请求参数不合法!';
+      break;
+    case errorTypes.RESOURCE_NOT_FOUND:
       status = 404;
-      message = 'NOT FOUND';
+      message = '资源不存在!';
+      break;
+    default:
+      // 未知异常一律 500：原来默认 404 + NOT FOUND，
+      // 会把 SQL 报错、空指针这类问题伪装成"接口不存在"，极难排查
+      status = 500;
+      message = '服务器内部错误!';
+      console.error('[未捕获异常]', error);
       break;
   }
 

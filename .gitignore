@@ -102,3 +102,6 @@ dist
 
 # TernJS port file
 .tern-port
+# 用户上传内容与本地密钥（私钥不应进版本库，新环境用 openssl 重新生成）
+uploads/
+src/app/keys/

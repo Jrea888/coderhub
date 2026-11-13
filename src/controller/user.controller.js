@@ -1,39 +1,40 @@
 /*
- * @Description: 用户注册接口的逻辑
+ * @Description: 用户注册 / 头像获取
  * @Author: zhangweigang
  * @Date: 2021-08-09 09:22:49
- * @LastEditTime: 2021-08-13 21:44:55
+ * @LastEditTime: 2021-11-13 10:00:00
  * @LastEditors: zhangweigang
  */
 const fs = require('fs');
-const userSerice = require('../service/user.service');
+const path = require('path');
+const userService = require('../service/user.service');
 const fileService = require('../service/file.service');
-
 const { AVATAR_PATH } = require('../constants/filePath');
+const errorTypes = require('../constants/errorTypes');
 
 class UserController {
-  async create(ctx, next) {
-    // 获取用户参数
+  async create(ctx) {
     const user = ctx.request.body;
-    try {
-      // 数据查询 对数据库进行操作
-      const result = await userSerice.create(user);
-      // 返回给用户数据
-      ctx.body = result;
-    } catch (error) {
-      console.log(error);
-    }
+    // 参数校验在 verifyUser 中间件完成，这里只负责落库并返回安全字段
+    const result = await userService.create(user);
+    ctx.body = { ...result, message: '注册成功' };
   }
 
-  // 根据用户id获取用户头像信息
-  async userAvatarInfo(ctx, next) {
-    // 1、获取userID
-    const { userId } = ctx.params;
-    // 2、查找头像信息
-    const avatarInfo = await fileService.getAvatarUserInfo(userId);
-    // 3、提供头像信息
-    ctx.response.set('content-type', avatarInfo.mimtype);
-    ctx.body = fs.createReadStream(`${AVATAR_PATH}/${avatarInfo.filename}`);
+  // 根据用户 id 获取头像
+  async userAvatarInfo(ctx) {
+    const id = Number(ctx.params.userId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return ctx.app.emit('error', new Error(errorTypes.INVALID_PARAMETERS), ctx);
+    }
+
+    const avatarInfo = await fileService.getAvatarUserInfo(id);
+    // 原来没判空：用户没传过头像时 avatarInfo 是 undefined，取 .mimtype 直接 500
+    if (!avatarInfo) {
+      return ctx.app.emit('error', new Error(errorTypes.RESOURCE_NOT_FOUND), ctx);
+    }
+
+    ctx.set('content-type', avatarInfo.mimtype);
+    ctx.body = fs.createReadStream(path.join(AVATAR_PATH, avatarInfo.filename));
   }
 }
 
