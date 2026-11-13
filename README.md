@@ -25,6 +25,7 @@
 > 说明：token 原来用 `jsonwebtoken@8`，其依赖链在 Node 22+ 上会因 `Buffer.SlowBuffer` 被移除而启动崩溃
 > （`jsonwebtoken@8 → jws@3 → jwa@1 → buffer-equal-constant-time`，升级到 v9 仍然命中同一依赖），
 > 现已改为 `src/utils/token.js` 基于 `node:crypto` 自实现 RS256，行为与原来一致且零依赖。
+> 原库的具体用法、升级验证与替代方案对比见 [§4.2.1](#21-为什么移除-jsonwebtoken当前方案nodecrypto)。
 
 ## 二、目录结构与职责
 
@@ -140,6 +141,55 @@ signToken({ id, name }, PRIVATE_KEY, { expiresIn: 60 * 60 * 24 }) // 签发
 verifyToken(token, PUBLIC_KEY)                                     // 校验，失败抛错
 ```
 
+#### 2.1 为什么移除 `jsonwebtoken`（当前方案：`node:crypto`）
+
+**原实现确实在用这个库，不是“装了没用”。** 本分支的历史提交里有两处真实调用：
+
+```js
+// src/controller/login.controller.js（签发）
+const jwt = require('jsonwebtoken');
+const token = jwt.sign({ id, name }, PRIVATE_KEY, {
+  expiresIn: 60 * 60 * 24,
+  algorithm: 'RS256'
+});
+
+// src/middleware/auth.middleware.js（验签）
+const jwt = require('jsonwebtoken');
+const result = jwt.verify(token, PUBLIC_KEY, { algorithms: ['RS256'] });
+```
+
+`package.json` 里对应声明 `"jsonwebtoken": "^8.5.1"`（当时放在 `devDependencies`）。
+
+**移除原因**：Node 26 已移除 `Buffer.SlowBuffer`，而它的传递依赖在**模块加载阶段**就会访问该属性，服务还没开始处理请求就崩了：
+
+```
+jsonwebtoken@8 → jws@3 → jwa@1 → buffer-equal-constant-time@1
+                                     └─ SlowBuffer.prototype.equal  ← TypeError
+```
+
+升级也绕不开（两条链最终都落在同一个包上）：
+
+| 版本 | 依赖链 | 结果 |
+|---|---|---|
+| `jsonwebtoken@8.5.1` | jws@3 → jwa@1 → bcet | 启动即崩 |
+| `jsonwebtoken@9.0.3` | jws@4 → jwa@2 → bcet | 同样崩 |
+
+**现实现**（`src/utils/token.js`，约 85 行）：`crypto.sign('RSA-SHA256')` 签发、`crypto.verify()` 验签，校验顺序为**签名 → `alg === 'RS256'` → `exp`**；载荷仍为 `{ id, name, iat, exp }`，有效期 24 小时。
+
+**兼容性**：JWT 是标准格式（header.payload.signature），算法、载荷字段、密钥文件都没有变，因此**旧 token 仍然有效**（反过来也一样）；差异只是不再具备库里可选的 `aud` / `iss` / `nbf` 校验——本项目没有使用这些字段。
+
+**备选方案与取舍**：
+
+| 方案 | 优点 | 代价 |
+|---|---|---|
+| 降 Node 到 20/22 LTS + `jsonwebtoken@9` | 改动最小 | 运行时被锁定在旧版本 |
+| 换 `jose` | 活跃维护、无 `jwa` 依赖 | 偏 ESM，CommonJS 需动态 `import()` 或整体转 ESM |
+| **`node:crypto` 自研（当前）** | 零依赖、启动快 | 需自行维护（约 85 行），只覆盖用到的能力 |
+
+**提交时间线**：`74edea5` 引入 → `12ed5a6`（本分支）移除并改为 `utils/token.js` → `f30eeaf`（`feature/ts-koa3`）迁移为 `utils/token.ts`，实现逻辑一致。
+
+> 迁移到 Koa 3 + TypeScript 的版本见 `feature/ts-koa3` 分支，那里保留了同样的自研实现并带完整类型。
+
 ### 3. 权限校验
 
 路由参数名以 `Id` 结尾（`:momentId`、`:commentId`），表名由参数名推导，
@@ -234,7 +284,7 @@ npm run serve # 只用 node 跑一次
 
 | 问题 | 修复 |
 |---|---|
-| Node 22+ 下服务无法启动：`jsonwebtoken@8` 依赖链用到已移除的 `Buffer.SlowBuffer` | 移除 `jsonwebtoken`，用 `node:crypto` 自实现 RS256 签发/校验（`utils/token.js`） |
+| Node 22+ 下服务无法启动：`jsonwebtoken@8` 依赖链用到已移除的 `Buffer.SlowBuffer` | 移除 `jsonwebtoken`，用 `node:crypto` 自实现 RS256 签发/校验（`utils/token.js`），详见 [§4.2.1](#21-为什么移除-jsonwebtoken当前方案nodecrypto) |
 | 未捕获异常时 Koa 自带 `onerror` 抢先 `res.end('Internal Server Error')`，`errorHandle` 改不动响应体 | `app/index.js` 增加最外层 `try/catch` 中间件，先转成 error 事件再统一响应 |
 | `package.json` 把 koa / mysql2 等运行依赖放在 `devDependencies`，`npm i --production` 装不出来 | 调整依赖分区，新增 `npm run serve` |
 
