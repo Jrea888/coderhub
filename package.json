@@ -1,23 +1,35 @@
 {
   "name": "corderhub",
-  "version": "1.0.0",
-  "description": "基于 Node.js + Koa + MySQL 的内容社区后端练习项目",
-  "main": "src/main.js",
+  "version": "2.0.0",
+  "description": "基于 Node.js + Koa 3 + MySQL 的内容社区后端（TypeScript）",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "start": "nodemon ./src/main.js",
-    "serve": "node ./src/main.js"
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "serve": "node dist/main.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "dotenv": "^10.0.0",
-    "koa": "^2.13.1",
-    "koa-bodyparser": "^4.3.0",
-    "koa-multer": "^1.0.2",
-    "koa-router": "^10.0.0",
-    "mysql2": "^2.3.0"
+    "@koa/multer": "^4.0.0",
+    "@koa/router": "^15.7.1",
+    "dotenv": "^17.0.0",
+    "koa": "^3.3.0",
+    "koa-bodyparser": "^4.4.1",
+    "multer": "^2.5.0",
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
-    "nodemon": "^2.0.12"
+    "@types/koa": "^3.0.3",
+    "@types/koa-bodyparser": "^4.3.13",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
