@@ -5,7 +5,7 @@ import {errorTypes} from '../constants/errorTypes'
 import authService, {type ResourceTable} from '../service/auth.service'
 import userService from '../service/user.service'
 import type {LoginBody, TokenPayload} from '../types/models'
-import md5password from '../utils/passwordHandle'
+import {hashPassword, needsRehash, verifyPassword} from '../utils/password'
 import {emitError, getBody} from '../utils/request'
 import {verifyToken} from '../utils/token'
 
@@ -28,9 +28,19 @@ export async function verifyLogin(ctx: RouterContext, next: Next): Promise<void>
         return
     }
 
-    if (md5password(password) !== user.password) {
+    // 支持 scrypt（当前）与历史 MD5；MD5 校验通过后顺手升级为 scrypt
+    if (!verifyPassword(password, user.password)) {
         emitError(ctx, errorTypes.CURRENT_USER_PASSWORD_ERROR)
         return
+    }
+
+    if (needsRehash(user.password)) {
+        try {
+            await userService.updatePassword(user.id, hashPassword(password))
+        } catch (error) {
+            // 升级失败不影响本次登录，下次登录会再次尝试
+            console.error('[password] 升级哈希失败:', error)
+        }
     }
 
     ctx.state.user = {id: user.id, name: user.name}

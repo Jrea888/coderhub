@@ -3,7 +3,7 @@ import type {RouterContext} from '@koa/router'
 import {errorTypes} from '../constants/errorTypes'
 import userService from '../service/user.service'
 import type {RegisterBody} from '../types/models'
-import md5password from '../utils/passwordHandle'
+import {hashPassword} from '../utils/password'
 import {emitError, getBody} from '../utils/request'
 
 /** 注册校验：用户名密码非空 + 用户名未被占用 */
@@ -24,11 +24,11 @@ export async function verifyUser(ctx: RouterContext, next: Next): Promise<void> 
     await next()
 }
 
-/** 密码摘要（MD5，历史方案） */
+/** 密码哈希（scrypt + 随机盐，替换原来的裸 MD5） */
 export async function handlePassword(ctx: RouterContext, next: Next): Promise<void> {
     const request = ctx.request as unknown as {body: RegisterBody}
     if (request.body.password) {
-        request.body.password = md5password(request.body.password)
+        request.body.password = hashPassword(request.body.password)
     }
     await next()
 }

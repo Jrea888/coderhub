@@ -9,7 +9,8 @@ USE `coder_hub`;
 CREATE TABLE IF NOT EXISTS `users` (
     `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(50) NOT NULL,
-    `password` VARCHAR(255) NOT NULL,
+    -- scrypt 哈希约 175 字符，255 足够；老库需执行 db/migrations/001-widen-password.sql
+  `password` VARCHAR(255) NOT NULL,
     `avatar_url` VARCHAR(255) DEFAULT NULL,
     `createAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updateAt` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

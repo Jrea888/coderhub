@@ -23,6 +23,13 @@ class UserService {
         const [result] = await pool.execute<ResultSetHeader>(statement, [avatarUrl, id])
         return result
     }
+
+    /** 更新密码哈希（历史 MD5 登录成功后自动升级为 scrypt） */
+    async updatePassword(id: number, password: string): Promise<ResultSetHeader> {
+        const statement = `UPDATE users SET password = ? WHERE id = ?;`
+        const [result] = await pool.execute<ResultSetHeader>(statement, [password, id])
+        return result
+    }
 }
 
 export default new UserService()

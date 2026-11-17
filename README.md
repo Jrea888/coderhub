@@ -53,6 +53,7 @@
 | 数据库 | mysql2 | 3.24.6 | 连接池 + `promise()`，原生 SQL |
 | 配置 | dotenv | 17.4.2 | `.env` → `process.env` |
 | 认证 | `node:crypto` | 内置 | RS256 签发/验签，零第三方依赖 |
+| 密码 | scrypt（`node:crypto`） | 内置 | 随机盐 + 可调参数；兼容历史 MD5 并在登录时自动升级 |
 | 格式化 | Prettier | 3.10.1 | `.prettierrc` 固化风格，`npm run format` |
 | 静态检查 | Biome | 2.6.7 | `npm run lint`，替代 ESLint（原因见 [§7.8](#8-代码规范为什么用-biome-而不是-eslint)） |
 
@@ -62,6 +63,7 @@
 
 - **不用 `jsonwebtoken`**：其依赖链 `jws → jwa → buffer-equal-constant-time` 在 Node 22+ 会因 `Buffer.SlowBuffer` 被移除而启动崩溃（Node 26 实测），因此用 `node:crypto` 约 70 行实现签发与校验。原库的用法、升级验证与替代方案对比见 [§7.2.1](#21-为什么移除-jsonwebtoken当前方案nodecrypto)。
 - **不用 `ts-node`**：ts-node 10 与 TypeScript 7 不兼容，改用 `tsx`。
+- **密码不用 MD5**：改为 scrypt + 随机盐，历史 MD5 在用户下次登录成功时自动重哈希（见 [§7.2.2](#22-密码哈希scrypt--随机盐)）。
 
 ---
 
@@ -83,11 +85,17 @@ mysql -u root -p < db/schema.sql
 
 # 3. 配置环境变量
 cp .env.example .env        # Windows: copy .env.example .env
-#   修改 MYSQL_USER / MYSQL_PASSWORD 为本机凭据
+#   修改 MYSQL_USER / MYSQL_PASSWORD 为本机凭据（库名默认 coder_hub）
 
-# 4. 启动
+# 4. 生成 JWT 密钥对（密钥不入库；已有密钥可跳过）
+npm run keys:generate
+
+# 5. 启动
 npm run dev                 # tsx watch，改代码自动重启
 ```
+
+> 从旧版本升级：先执行 `db/migrations/001-widen-password.sql`（把 `users.password` 加宽到 255），
+> 再启动新代码。历史 MD5 密码会在用户下次登录时自动升级为 scrypt，无需重置密码。
 
 启动成功后控制台输出：
 
@@ -125,7 +133,11 @@ curl -X POST http://localhost:8888/moment \
 ```
 coderhub/
 ├── db/
-│   └── schema.sql                 # 建库建表脚本（7 张表，含外键/索引）
+│   ├── schema.sql                 # 建库建表脚本（7 张表，含外键/索引）
+│   └── migrations/
+│       └── 001-widen-password.sql # 老库密码列加宽到 255（可重复执行）
+├── scripts/
+│   └── generate-keys.mjs          # 生成/轮换 RS256 密钥对
 ├── src/
 │   ├── main.ts                    # 入口：监听 APP_PORT
 │   ├── app/
@@ -143,7 +155,7 @@ coderhub/
 │   │   └── filePath.ts            # AVATAR_PATH / PICTURE_PATH
 │   ├── utils/
 │   │   ├── token.ts               # RS256 JWT 签发/验签
-│   │   ├── passwordHandle.ts      # MD5 摘要
+│   │   ├── password.ts            # scrypt 哈希/校验（兼容历史 MD5）
 │   │   └── request.ts             # getBody / toPositiveInt / emitError
 │   └── types/
 │       ├── models.ts              # 表行类型、DTO、JWT 载荷
@@ -450,6 +462,26 @@ jsonwebtoken@8 → jws@3 → jwa@1 → buffer-equal-constant-time@1
 
 **提交时间线**：`74edea5` 引入 → `12ed5a6`（`main`）移除并改为 `utils/token.js` → `f30eeaf`（本分支）迁移为 `utils/token.ts`。
 
+### 2.2 密码哈希：scrypt + 随机盐
+
+原来用裸 MD5（`md5(password)`），问题是**无盐**（彩虹表秒查）、**太快**（GPU 每秒几十亿次），
+一旦库泄露基本等于明文。现在改用 Node 内置 `crypto.scryptSync`：
+
+- 存储格式：`scrypt$N$r$p$salt$hash`（salt/hash 为 base64url），参数随哈希一起保存，
+  以后调整 `N/r/p` 也不会让老密码失效；
+- 默认参数 `N=16384, r=8, p=1`，keylen 64 字节，每个用户独立 16 字节随机盐，
+  单条哈希约 **126 字符**（`users.password VARCHAR(255)` 足够）；
+- 校验用 `crypto.timingSafeEqual`，避免时序侧信道；
+- **兼容历史数据**：32 位十六进制的旧 MD5 仍可登录，`verifyLogin` 检测到 `needsRehash`
+  后会用 scrypt 重写该行（升级失败只记日志，不影响本次登录）；
+- 注册统一写入 scrypt，不再产生新 MD5。
+
+为什么不用 bcrypt：`bcrypt` 需要原生扩展（node-gyp 编译），而 scrypt 是 Node 内置，
+参数可控、零编译依赖；两者的安全目标一致（慢哈希 + 随机盐）。
+
+> 老库升级顺序很重要：**先**执行 `db/migrations/001-widen-password.sql` 把列加宽，
+> **再**启动新代码，否则写入 126 字符的哈希会报 `Data too long for column 'password'`。
+
 
 ### 3. 权限校验：参数名推导表名
 
@@ -549,6 +581,8 @@ Biome 是 Rust 实现、自带 TS 解析器、不依赖 TS 编译器 API，因�
 | `npm run format:check` | `prettier --check`，CI 用，不改文件 |
 | `npm run build` | `tsc -p tsconfig.json` → `dist/` |
 | `npm run serve` | `node dist/main.js`，需先 `build` |
+| `npm run keys:generate` | 生成 RSA 密钥对到 `src/app/keys`（已存在则拒绝） |
+| `npm run keys:rotate` | 强制重新生成密钥（旧 token 全部失效） |
 
 > `tsx` 只做转译、不做类型检查，CI 里要单独跑 `npm run typecheck`。
 > 提交前建议依次跑 `npm run lint`、`npm run format:check`、`npm run typecheck`。
@@ -561,7 +595,7 @@ Biome 是 Rust 实现、自带 TS 解析器、不依赖 TS 编译器 API，因�
 | `APP_PORT` | `8888` | 监听端口 |
 | `MYSQL_HOST` | `localhost` | 数据库地址 |
 | `MYSQL_PORT` | `3306` | 数据库端口 |
-| `MYSQL_DATABASE` | `codetest` | 库名 |
+| `MYSQL_DATABASE` | `coder_hub` | 库名 |
 | `MYSQL_USER` | `root` | 账号 |
 | `MYSQL_PASSWORD` | 空 | 密码 |
 | `KEY_DIR` | `src/app/keys` | 可选，自定义 RSA 密钥目录（部署时挂载） |
@@ -570,14 +604,28 @@ Biome 是 Rust 实现、自带 TS 解析器、不依赖 TS 编译器 API，因�
 
 ### 密钥
 
-若 `src/app/keys` 不存在（新克隆且未拿到密钥），自行生成：
+`src/app/keys/` 已**从版本库移除**（`.gitignore` 覆盖 `src/app/keys/`），新环境必须自行生成：
+
+```bash
+npm run keys:generate     # 生成 2048 位 RSA（PKCS#8/SPKI）；已存在则拒绝覆盖
+npm run keys:rotate       # 强制覆盖（轮换密钥，旧 token 全部失效）
+```
+
+也可以继续用 openssl：
 
 ```bash
 openssl genrsa -out src/app/keys/private.key 2048
 openssl rsa -in src/app/keys/private.key -pubout -out src/app/keys/public.key
 ```
 
-`config.ts` 定位密钥用的是 **项目根下的 `src/app/keys`**，而不是 `__dirname/keys`——因为 `tsc` 不复制 `.key` 到 `dist`，用 `__dirname` 会在构建后 ENOENT。
+- **轮换影响**：token 用私钥签发、公钥验签，换密钥后此前签发的所有 token 都会 401
+  （回归中已用旧私钥签发的 token 验证过）；
+- **路径**：`config.ts` 定位的是项目根下的 `src/app/keys`（可用 `KEY_DIR` 覆盖），
+  不是 `__dirname/keys`——因为 `tsc` 不复制 `.key` 到 `dist`，用 `__dirname` 会在构建后 ENOENT；
+- **历史提交**：旧私钥仍存在于 Git 历史里，本地已轮换；若要彻底清除，需要
+  `git filter-repo` 改写历史并强推（会影响协作者），或直接在 GitHub 上重建仓库；
+- **生产**：不要把密钥打进镜像或仓库，用挂载卷 / 密钥管理服务（KMS、Vault）注入，
+  并定期轮换。
 
 ---
 
@@ -616,6 +664,15 @@ openssl rsa -in src/app/keys/private.key -pubout -out src/app/keys/public.key
 | `node dist/main.js` | 启动并正常响应 |
 | `npm run start`（tsx） | 启动并正常响应 |
 | 接口端到端回归 | **62 项断言全部通过** |
+| 安全回归（密码 + 密钥） | **14 项断言全部通过** |
+
+安全回归覆盖：
+
+- 注册后 `users.password` 为 `scrypt$...`（126 字符），不再是 32 位 MD5；
+- 相同密码的两个用户哈希不同（随机盐生效）；
+- 历史 MD5 用户可正常登录，登录后该行自动升级为 scrypt，再次登录仍成功；
+- 用**旧私钥**签发的 token 访问 `/test` 返回 401（密钥轮换生效）；
+- `db/migrations/001-widen-password.sql` 可重复执行，执行后 `password` 为 `varchar(255)`。
 
 回归覆盖：
 
@@ -635,14 +692,15 @@ openssl rsa -in src/app/keys/private.key -pubout -out src/app/keys/public.key
 按优先级排列，都是**当前代码的真实行为**，不是待办占位：
 
 1. **重复创建同名标签返回 500**。`label.name` 有唯一索引，`POST /label` 直接裸插，`ER_DUP_ENTRY` 落到默认 500。应捕获 errno `1062` 返回 409，或改为幂等返回已有记录。（回归中已固定该行为）
-2. **密码是无盐 MD5**。换 scrypt/bcrypt 前要先加宽列：`ALTER TABLE users MODIFY password VARCHAR(255);`（schema 已是 255，老库需确认），否则可能写入失败。
-3. **私钥与测试图片进了版本库**。`src/app/keys/private.key`、`uploads/*.jpg` 仍被 Git 跟踪（`.gitignore` 对已跟踪文件无效）。建议 `git rm --cached` 并轮换密钥。
-4. **删除动态不清理磁盘文件**。数据库记录随外键级联删除，`uploads/` 下的物理文件成为孤儿。
-5. **缺少通用能力**：CORS、请求日志、限流、单元测试均未引入。
-6. **`tsx` 不做类型检查**，CI 需单独跑 `npm run typecheck`。
-7. **`package.json` 的 `name` 拼成了 `corderhub`**（少一个 d），不影响运行。
-8. **列表/详情键名不统一**：列表用 `users`，详情用 `author`；`comments`/`labels`/`images` 无数据时为 `null`。
-9. **`src/**/*.txt` 是 0 字节占位笔记**，按课程需求保留，不参与构建。
+2. **删除动态不清理磁盘文件**。数据库记录随外键级联删除，`uploads/` 下的物理文件成为孤儿。
+3. **缺少通用能力**：CORS、请求日志、限流、单元测试均未引入。
+4. **`tsx` 不做类型检查**，CI 需单独跑 `npm run typecheck`。
+5. **`package.json` 的 `name` 拼成了 `corderhub`**（少一个 d），不影响运行。
+6. **列表/详情键名不统一**：列表用 `users`，详情用 `author`；`comments`/`labels`/`images` 无数据时为 `null`。
+7. **`src/**/*.txt` 是 0 字节占位笔记**，按课程需求保留，不参与构建。
+
+> 已修复（保留记录）：密码已由裸 MD5 改为 scrypt（见 [§7.2.2](#22-密码哈希scrypt--随机盐)）；
+> `src/app/keys/*` 与 `uploads/*` 已 `git rm --cached` 并从 `.gitignore` 忽略，密钥已轮换。
 
 ---
 

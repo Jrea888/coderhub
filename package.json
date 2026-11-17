@@ -14,7 +14,9 @@
     "lint": "biome lint src",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "serve": "node dist/main.js"
+    "serve": "node dist/main.js",
+    "keys:generate": "node scripts/generate-keys.mjs",
+    "keys:rotate": "node scripts/generate-keys.mjs --force"
   },
   "author": "",
   "license": "ISC",

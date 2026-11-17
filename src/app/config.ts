@@ -26,6 +26,6 @@ export const APP_PORT: number = Number(process.env.APP_PORT) || 8888
 
 export const MYSQL_HOST: string = process.env.MYSQL_HOST || 'localhost'
 export const MYSQL_PORT: number = Number(process.env.MYSQL_PORT) || 3306
-export const MYSQL_DATABASE: string = process.env.MYSQL_DATABASE || 'codetest'
+export const MYSQL_DATABASE: string = process.env.MYSQL_DATABASE || 'coder_hub'
 export const MYSQL_USER: string = process.env.MYSQL_USER || 'root'
 export const MYSQL_PASSWORD: string = process.env.MYSQL_PASSWORD || ''
